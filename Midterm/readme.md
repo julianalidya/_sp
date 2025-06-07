@@ -1,4 +1,3 @@
-```
 # Mini Arithmetic Interpreter
 
 ## Project Description
