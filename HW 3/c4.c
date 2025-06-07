@@ -33,14 +33,17 @@ int *e, *le,  // current position in emitted code (e: 目前機器碼指標, le:
 // tokens and classes (operators last and in precedence order) (按優先權順序排列)
 enum { // token : 0-127 直接用該字母表達， 128 以後用代號。
   Num = 128, Fun, Sys, Glo, Loc, Id,
-  Char, Else, Enum, If, Int, Return, Sizeof, While,
-  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
+  Char, Else, Enum, If, Int, Return, Sizeof, While, Do,
+  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge,
+  Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
 };
 
 // opcodes (機器碼的 op)
-enum { LLA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
-       OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT };
+enum {
+  LLA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
+  OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
+  OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT
+};
 
 // types (支援型態，只有 int, char, pointer)
 enum { CHAR, INT, PTR };
@@ -294,25 +297,23 @@ void expr(int lev) // 運算式 expression, 其中 lev 代表優先等級
   }
 }
 
-void stmt() // 陳述 statement
-{
+void stmt() {
   int *a, *b;
-
-  if (tk == If) { // if 語句
+  if (tk == If) {
     next();
     if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
     expr(Assign);
     if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); }
     *++e = BZ; b = ++e;
     stmt();
-    if (tk == Else) { // else 語句
+    if (tk == Else) {
       *b = (int)(e + 3); *++e = JMP; b = ++e;
       next();
       stmt();
     }
     *b = (int)(e + 1);
   }
-  else if (tk == While) { // while 語句
+  else if (tk == While) {
     next();
     a = e + 1;
     if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
@@ -323,21 +324,32 @@ void stmt() // 陳述 statement
     *++e = JMP; *++e = (int)a;
     *b = (int)(e + 1);
   }
-  else if (tk == Return) { // return 語句
+  else if (tk == Do) {
+    next();
+    a = e + 1;
+    stmt();
+    if (tk == While) next(); else { printf("%d: 'while' expected after 'do'\n", line); exit(-1); }
+    if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
+    expr(Assign);
+    if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); }
+    *++e = BNZ; *++e = (int)a;
+    if (tk == ';') next();
+  }
+  else if (tk == Return) {
     next();
     if (tk != ';') expr(Assign);
     *++e = LEV;
     if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
   }
-  else if (tk == '{') { // 區塊 {...}
+  else if (tk == '{') {
     next();
     while (tk != '}') stmt();
     next();
   }
-  else if (tk == ';') { // ; 空陳述
+  else if (tk == ';') {
     next();
   }
-  else { // 指定 assign
+  else {
     expr(Assign);
     if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
   }
@@ -502,59 +514,38 @@ int run(int *pc, int *bp, int *sp) { // 虛擬機 => pc: 程式計數器, sp: �
   }
 }
 
-int compile(int argc, char **argv) // 主程式
-{
-  int fd, ty, poolsz, *idmain;
-  int *pc, *bp, *sp;
-  int i, *t, dump;
-
-  dump = 0;
+int compile(int argc, char **argv) {
+  int fd, poolsz, *idmain, *pc, *bp, *sp, i, *t, dump = 0;
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
   if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') { debug = 1; --argc; ++argv; }
   if (argc > 0 && **argv == '-' && (*argv)[1] == 'u') { dump = 1; --argc; ++argv; }
   if (argc < 1) { printf("usage: c4 [-s] [-d] file ...\n"); return -1; }
-
   if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; }
 
-  poolsz = 256*1024; // arbitrary size
-  if (!(sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; } // 符號段
-  if (!(le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; } // 程式段
-  if (!(data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; } // 資料段
-  if (!(sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }  // 堆疊段
+  poolsz = 256 * 1024;
+  sym = malloc(poolsz); e = le = malloc(poolsz); data = malloc(poolsz); sp = malloc(poolsz);
+  memset(sym, 0, poolsz); memset(e, 0, poolsz); memset(data, 0, poolsz);
 
-  memset(sym,  0, poolsz);
-  memset(e,    0, poolsz);
-  memset(data, 0, poolsz);
+  p = "char else enum if int return sizeof while do open read close printf malloc free memset memcmp exit void main";
+  i = Char; while (i <= Do) { next(); id[Tk] = i++; }
+  i = OPEN; while (i <= EXIT) { next(); id[Class] = Sys; id[Type] = INT; id[Val] = i++; }
+  next(); id[Tk] = Char; next(); idmain = id;
 
-  p = "char else enum if int return sizeof while "
-      "open read close printf malloc free memset memcmp exit void main";
-  i = Char; while (i <= While) { next(); id[Tk] = i++; } // add keywords to symbol table
-  i = OPEN; while (i <= EXIT) { next(); id[Class] = Sys; id[Type] = INT; id[Val] = i++; } // add library to symbol table
-  next(); id[Tk] = Char; // handle void type
-  next(); idmain = id; // keep track of main
-
-  if (!(lp = p = malloc(poolsz))) { printf("could not malloc(%d) source area\n", poolsz); return -1; }
-  if ((i = read(fd, p, poolsz-1)) <= 0) { printf("read() returned %d\n", i); return -1; }
-  p[i] = 0; // 設定程式 p 字串結束符號 \0
-  close(fd);
+  lp = p = malloc(poolsz);
+  i = read(fd, p, poolsz - 1); p[i] = 0; close(fd);
 
   if (prog() == -1) return -1;
-
   if (!(pc = (int *)idmain[Val])) { printf("main() not defined\n"); return -1; }
   if (src) return 0;
   if (dump) { sym_dump(sym); return 0; }
 
-  // setup stack
   bp = sp = (int *)((int)sp + poolsz);
-  *--sp = EXIT; // call exit if main returns
-  *--sp = PSH; t = sp;
-  *--sp = argc;
-  *--sp = (int)argv;
-  *--sp = (int)t;
+  *--sp = EXIT; *--sp = PSH; t = sp;
+  *--sp = argc; *--sp = (int)argv; *--sp = (int)t;
   return run(pc, bp, sp);
 }
 
-int main(int32_t argc, char **argv) { // 主程式
+int main(int32_t argc, char **argv) {
   compile(argc, argv);
 }
