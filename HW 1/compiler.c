@@ -24,7 +24,6 @@ int isEnd() {
 }
 
 char *next() {
-  // printf("token[%d]=%s\n", tokenIdx, tokens[tokenIdx]);
   return tokens[tokenIdx++];
 }
 
@@ -40,11 +39,11 @@ char *skip(char *set) {
 // F = (E) | Number | Id
 int F() {
   int f;
-  if (isNext("(")) { // '(' E ')'
+  if (isNext("(")) {
     next(); // (
     f = E();
-    next(); // )
-  } else { // Number | Id
+    skip(")");
+  } else {
     f = nextTemp();
     char *item = next();
     if (isdigit(*item)) {
@@ -63,7 +62,7 @@ int F() {
 // E = F (op E)*
 int E() {
   int i1 = F();
-  while (isNext("+ - * / & | ! < > = <= >= == !=")) {
+  while (isNext("+ - * / < > == != <= >= = & |")) {
     char *op = next();
     int i2 = E();
     int i = nextTemp();
@@ -73,9 +72,7 @@ int E() {
   return i1;
 }
 
-// FOR =  for (ASSIGN EXP; EXP) STMT
-
-// ASSIGN = id '=' E;
+// ASSIGN = id = E;
 void ASSIGN() {
   char *id = next();
   skip("=");
@@ -86,40 +83,97 @@ void ASSIGN() {
 
 // WHILE = while (E) STMT
 void WHILE() {
-  int whileBegin = nextLabel();
-  int whileEnd = nextLabel();
-  emit("(L%d)\n", whileBegin);
+  int L1 = nextLabel();
+  int L2 = nextLabel();
+  emit("(L%d)\n", L1);
   skip("while");
   skip("(");
   int e = E();
-  emit("if not T%d goto L%d\n", e, whileEnd);
   skip(")");
+  emit("if not T%d goto L%d\n", e, L2);
   STMT();
-  emit("goto L%d\n", whileBegin);
-  emit("(L%d)\n", whileEnd);
-}
-
-// if (EXP) STMT (else STMT)?
-void IF() {
-  skip("if");
-  skip("(");
-  E();
-  skip(")");
-  STMT();
-  if (isNext("else")) {
-    skip("else");
-    STMT();
-  }
+  emit("goto L%d\n", L1);
+  emit("(L%d)\n", L2);
 }
 
 // DOWHILE = do STMT while (E);
+void DOWHILE() {
+  int L1 = nextLabel();
+  emit("(L%d)\n", L1);
+  skip("do");
+  STMT();
+  skip("while");
+  skip("(");
+  int e = E();
+  skip(")");
+  skip(";");
+  emit("if T%d goto L%d\n", e, L1);
+}
 
-// STMT = WHILE | BLOCK | IF | DOWHILE | ASSIGN
+// IF = if (E) STMT (else STMT)?
+void IF() {
+  skip("if");
+  skip("(");
+  int e = E();
+  skip(")");
+  int Lelse = nextLabel();
+  int Lend = nextLabel();
+  emit("if not T%d goto L%d\n", e, Lelse);
+  STMT();
+  if (isNext("else")) {
+    emit("goto L%d\n", Lend);
+    emit("(L%d)\n", Lelse);
+    skip("else");
+    STMT();
+    emit("(L%d)\n", Lend);
+  } else {
+    emit("(L%d)\n", Lelse);
+  }
+}
+
+// FOR = for (ASSIGN E; ASSIGN) STMT
+void FOR() {
+  skip("for");
+  skip("(");
+  ASSIGN(); // init
+  int L1 = nextLabel();
+  int L2 = nextLabel();
+  emit("(L%d)\n", L1);
+  int e = E(); // condition
+  skip(";");
+  emit("if not T%d goto L%d\n", e, L2);
+
+  // simpan index start increment
+  int incStart = tokenIdx;
+  while (!isNext(")")) next();
+  int incEnd = tokenIdx;
+
+  tokenIdx = incStart;
+  int tmp = nextTemp();
+  emit("// increment\n");
+  while (tokenIdx < incEnd) {
+    char *id = next();
+    if (strcmp(id, "=") == 0) {
+      char *var = tokens[tokenIdx - 2];
+      int val = E();
+      emit("%s = t%d\n", var, val);
+    }
+  }
+
+  skip(")");
+  STMT();
+  emit("goto L%d\n", L1);
+  emit("(L%d)\n", L2);
+}
+
+// STMT = WHILE | DOWHILE | FOR | IF | BLOCK | ASSIGN
 void STMT() {
   if (isNext("while"))
     WHILE();
-  // else if (isNext("do"))
-  //  DOWHILE();
+  else if (isNext("do"))
+    DOWHILE();
+  else if (isNext("for"))
+    FOR();
   else if (isNext("if"))
     IF();
   else if (isNext("{"))
