@@ -47,10 +47,4 @@ Output:
 - `factor()`: Evaluates numbers or sub-expressions inside parentheses
 
 ## Originality
-- 100% written independently without AI or copying from other projects
-- No external parsing libraries used
-- Created as an exercise to understand interpreter functionality
-
-## Additional Documentation
-For further explanation, comments are included within the source code.
-```
+- Use ChatGPT for help
