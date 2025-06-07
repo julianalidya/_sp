@@ -6,5 +6,5 @@ mul3.s:7: Warning: end of file not at end of a line; newline inserted
 
 $ ./a.out
 mul3(3,2,5)=30
-
+```
 # note: Using gcc -O3 enables optimization. Add -O3 for better performance if needed.
